@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>无人机集群 · 拓扑分布调度器</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #111c2e;
+      --panel-2: #16233a;
+      --line: #24344f;
+      --text: #e8eefc;
+      --muted: #93a4c3;
+      --accent: #38bdf8;
+      --accent-2: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --soft: #a78bfa;
+      --selected: rgba(56, 189, 248, .16);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(1200px 500px at 80% -10%, #18314f 0%, transparent 60%), var(--bg);
+      color: var(--text);
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    header {
+      padding: 22px 28px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(11,18,32,.86);
+      position: sticky; top: 0; z-index: 20;
+      backdrop-filter: blur(10px);
+    }
+    h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: .5px; }
+    .subtitle { color: var(--muted); margin: 0; font-size: 13px; }
+    main { padding: 22px 28px 60px; max-width: 1680px; margin: 0 auto; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+    button, select, input {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      outline: none;
+    }
+    input { width: 130px; font-family: var(--mono); }
+    button { cursor: pointer; transition: .15s ease; font-weight: 600; }
+    button:hover { border-color: var(--accent); color: #fff; transform: translateY(-1px); }
+    button.primary { background: #0369a1; border-color: #0284c7; }
+    button.good { background: #166534; border-color: #16a34a; }
+    button.warn { background: #92400e; border-color: #d97706; }
+    select { max-width: 360px; }
+    .hint { color: var(--muted); font-size: 12px; }
+    #toast {
+      margin-top: 10px; padding: 9px 12px; border-radius: 8px;
+      background: #0c4a6e; border: 1px solid #0284c7; display: none;
+    }
+    #toast.error { background: #7f1d1d; border-color: #ef4444; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .card { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+    .card .k { color: var(--muted); font-size: 12px; }
+    .card .v { font-size: 26px; font-weight: 750; margin-top: 2px; font-family: var(--mono); }
+    section { margin: 22px 0; }
+    .panel { background: rgba(17,28,46,.92); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    .panel-h { padding: 15px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .panel-h h2 { margin: 0; font-size: 16px; }
+    .panel-h p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+    .panel-b { padding: 16px 18px; }
+    .table-wrap { overflow: auto; max-width: 100%; border-radius: 12px; border: 1px solid var(--line); }
+    table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12.5px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; }
+    th { position: sticky; top: 0; background: #1a2942; color: #c8d6f2; z-index: 2; font-weight: 700; }
+    tr:last-child td { border-bottom: 0; }
+    .dist th:first-child, .dist td:first-child { position: sticky; left: 0; background: var(--panel); z-index: 3; min-width: 210px; }
+    .dist th:first-child { background: #1a2942; z-index: 4; }
+    .dist td.num, .dist th.num { text-align: center; min-width: 74px; }
+    .wl-name { font-weight: 700; }
+    .wl-sub { color: var(--muted); font-size: 11px; }
+    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid transparent; }
+    .badge.hard { background: rgba(239,68,68,.15); color: #fca5a5; border-color: rgba(239,68,68,.4); }
+    .badge.soft { background: rgba(167,139,250,.15); color: #ddd6fe; border-color: rgba(167,139,250,.4); }
+    .badge.none { background: rgba(148,163,184,.15); color: #cbd5e1; }
+    .badge.ok { background: rgba(34,197,94,.14); color: #86efac; border-color: rgba(34,197,94,.35); }
+    .badge.warn { background: rgba(245,158,11,.16); color: #fcd34d; border-color: rgba(245,158,11,.4); }
+    .badge.bad { background: rgba(239,68,68,.16); color: #fca5a5; border-color: rgba(239,68,68,.45); }
+    .cell { border-radius: 10px; padding: 5px 4px; text-align: center; min-width: 58px; }
+    .cell .c { font-size: 16px; font-weight: 800; font-family: var(--mono); line-height: 1.1; }
+    .cell .s { font-size: 10.5px; color: var(--muted); font-family: var(--mono); }
+    .cell.skew0 { background: rgba(34,197,94,.10); }
+    .cell.skew1 { background: rgba(56,189,248,.11); }
+    .cell.skew2 { background: rgba(245,158,11,.14); }
+    .cell.skew3, .cell.skew4, .cell.skew5 { background: rgba(239,68,68,.16); }
+    .cell.excluded { background: repeating-linear-gradient(45deg, rgba(148,163,184,.08), rgba(148,163,184,.08) 6px, transparent 6px, transparent 12px); opacity: .62; }
+    .cell.excluded .c { color: var(--muted); }
+    .mono { font-family: var(--mono); }
+    .muted { color: var(--muted); }
+    .grid-2 { display: grid; grid-template-columns: 360px 1fr; gap: 16px; }
+    @media (max-width: 1100px) { .grid-2 { grid-template-columns: 1fr; } }
+    .decision-list { max-height: 640px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; }
+    .decision-item { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 10px 12px; display: block; }
+    .decision-item:hover { background: rgba(56,189,248,.08); transform: none; }
+    .decision-item.active { background: var(--selected); border-left: 3px solid var(--accent); padding-left: 9px; }
+    .decision-item .top { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
+    .decision-item .meta { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+    .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 10px; margin-bottom: 14px; }
+    .metric { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+    .metric .k { color: var(--muted); font-size: 11.5px; }
+    .metric .v { font-family: var(--mono); font-size: 18px; font-weight: 750; margin-top: 2px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 14px; }
+    .chip { border: 1px solid var(--line); background: var(--panel-2); border-radius: 999px; padding: 3px 9px; font-size: 11.5px; font-family: var(--mono); }
+    .chip.good { border-color: rgba(34,197,94,.45); color: #86efac; }
+    .chip.bad { border-color: rgba(239,68,68,.5); color: #fca5a5; }
+    .chip.warn { border-color: rgba(245,158,11,.5); color: #fcd34d; }
+    .node-table tr.selected td { background: rgba(34,197,94,.10); font-weight: 700; }
+    .reason { display: inline-block; margin: 1px 3px 1px 0; padding: 1px 6px; border-radius: 6px; background: rgba(239,68,68,.14); color: #fca5a5; font-size: 10.5px; font-family: var(--mono); }
+    .reason.ok { background: rgba(34,197,94,.12); color: #86efac; }
+    .scorebar { height: 6px; width: 70px; background: #0b1424; border-radius: 999px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
+    .scorebar i { display: block; height: 100%; background: linear-gradient(90deg, #0ea5e9, #22c55e); }
+    .events { display: flex; flex-direction: column; gap: 7px; }
+    .event { border-left: 3px solid var(--accent); padding: 6px 10px; background: var(--panel-2); border-radius: 0 8px 8px 0; }
+    footer { color: var(--muted); font-size: 12px; text-align: center; padding: 24px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>无人机植保容器调度器 · 拓扑分布约束模拟</h1>
+  <p class="subtitle">节点 / 机库拓扑域 / 工作负载全部在 Go 程序内模拟；硬约束负责 Filter，软约束参与加权 Score，后台重平衡遵守 minAvailable。</p>
+  <div class="toolbar">
+    <label class="hint">随机种子 <input id="seed" value="20261125" /></label>
+    <button class="primary" onclick="resetSim()">重新生成并播放剧本</button>
+    <button class="good" onclick="addHangar()">新增机库</button>
+    <select id="hangarPowerSelect" style="max-width:130px"></select>
+    <button class="warn" onclick="powerHangar(false)">机库停电</button>
+    <button class="good" onclick="powerHangar(true)">恢复供电</button>
+    <button class="warn" onclick="rebalance()">执行重平衡</button>
+    <select id="scaleSelect"></select>
+    <button onclick="scaleDown()">缩容 1 个副本</button>
+    <span class="hint">建议先新增机库制造偏斜，再执行重平衡。</span>
+  </div>
+  <div id="toast"></div>
+</header>
+
+<main>
+  <div class="cards" id="cards"></div>
+
+  <section class="panel">
+    <div class="panel-h">
+      <div>
+        <h2>① 各拓扑域副本数、当前偏斜与最大允许偏斜</h2>
+        <p>单元格为 <b>副本数 / 相对全局基准的偏斜</b>；斜线灰格表示被 nodeSelector 排除或没有可用节点、不参与最小值计算的域。</p>
+      </div>
+      <span class="badge ok" id="hardStatus">硬约束状态：校验中</span>
+    </div>
+    <div class="panel-b">
+      <div class="table-wrap">
+        <table class="dist">
+          <thead id="distHead"></thead>
+          <tbody id="distBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-h">
+      <div>
+        <h2>② 每次调度的 Filter 与打分明细</h2>
+        <p>左侧是逐副本调度记录；右侧枚举该次调度的全部节点。批量调度严格逐个提交并更新计数。</p>
+      </div>
+      <select id="decisionFilter" onchange="renderDecisions()"></select>
+    </div>
+    <div class="panel-b grid-2">
+      <div class="decision-list" id="decisionList"></div>
+      <div id="decisionDetail"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-h">
+      <div>
+        <h2>③ 缩容选择与重平衡驱逐记录</h2>
+        <p>缩容先选副本数最多的域，平局按节点资源空闲度；重平衡只驱逐硬约束违反者，且驱逐后可用副本不得低于 minAvailable。</p>
+      </div>
+    </div>
+    <div class="panel-b">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID/顺序</th><th>类型</th><th>工作负载/版本</th><th>状态</th>
+              <th>来源域/节点/副本</th><th>域副本数</th><th>偏斜 前→后</th>
+              <th>可用 前→后 / 下限</th><th>补位节点</th><th>原因</th>
+            </tr>
+          </thead>
+          <tbody id="disruptionBody"></tbody>
+        </table>
+      </div>
+      <h3 style="margin:18px 0 8px;font-size:14px;">拓扑事件</h3>
+      <div class="events" id="eventList"></div>
+    </div>
+  </section>
+</main>
+
+<footer>toposcheduler · Go standard library only · <span class="mono">go test ./... -count=1</span> 可复跑固定种子暴力核对</footer>
+
+<script>
+let dash = null;
+let selectedDecisionId = null;
+
+const reasonCN = {
+  node_not_ready: "节点未 Ready",
+  node_cordoned: "节点禁止调度",
+  selector_mismatch: "nodeSelector 不匹配",
+  missing_topology_label: "缺少拓扑标签",
+  insufficient_cpu: "CPU 不足",
+  insufficient_memory: "内存不足",
+  no_available_node: "无可用节点",
+  topology_skew: "拓扑偏斜超限"
+};
+
+function fmt(n, d=1) { return Number(n || 0).toFixed(d); }
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function reasonText(r) {
+  if (!r) return "";
+  if (r.startsWith("topology_skew_")) return "拓扑偏斜超过 maxSkew";
+  return reasonCN[r] || r;
+}
+function showToast(msg, isError=false) {
+  const el = document.getElementById("toast");
+  el.style.display = "block";
+  el.className = isError ? "error" : "";
+  el.textContent = msg;
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => { el.style.display = "none"; }, 5200);
+}
+
+async function refresh() {
+  const r = await fetch("/api/dashboard");
+  dash = await r.json();
+  renderAll();
+}
+
+async function postAction(url, body) {
+  const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body || {})});
+  const data = await r.json();
+  if (data.dashboard) {
+    dash = data.dashboard;
+    renderAll();
+  } else {
+    await refresh();
+  }
+  showToast(data.message || data.error || "操作完成", !data.ok);
+  if (data.error && data.ok) console.warn(data.error);
+}
+
+function resetSim() {
+  const seed = Number(document.getElementById("seed").value || 20261125);
+  postAction("/api/reset", {seed});
+}
+function addHangar() { postAction("/api/add-hangar", {}); }
+function powerHangar(on) {
+  const hangar = document.getElementById("hangarPowerSelect").value;
+  if (!hangar) return;
+  if (!on && !window.confirm("确认模拟机库 " + hangar + " 停电？该机库副本将丢失且拓扑域不参与基准计算。")) return;
+  postAction("/api/power-hangar", {hangar, on});
+}
+function rebalance() { postAction("/api/rebalance", {}); }
+function scaleDown() {
+  const v = document.getElementById("scaleSelect").value;
+  if (!v) return;
+  const [workload_id, version] = v.split("||");
+  postAction("/api/scale-down", {workload_id, version});
+}
+
+function renderAll() {
+  renderCards();
+  renderHangarSelect();
+  renderDistribution();
+  renderScaleSelect();
+  renderDecisionFilter();
+  renderDecisions();
+  renderDisruptions();
+  renderEvents();
+}
+
+function renderHangarSelect() {
+  const sel = document.getElementById("hangarPowerSelect");
+  const current = sel.value;
+  const power = {};
+  for (const n of dash.state.nodes) {
+    power[n.hangar] = power[n.hangar] === false ? false : n.ready;
+  }
+  sel.innerHTML = dash.hangars.map(h =>
+    `<option value="${esc(h)}">${esc(h)} · ${power[h] === false ? "停电" : "在线"}</option>`
+  ).join("");
+  if ([...sel.options].some(o => o.value === current)) sel.value = current;
+}
+
+function renderCards() {
+  const s = dash.summary;
+  document.getElementById("cards").innerHTML = [
+    ["机库/拓扑域", s.hangars],
+    ["模拟节点", s.nodes],
+    ["工作负载", s.workloads],
+    ["运行副本", s.replicas],
+    ["调度尝试", s.scheduling_calls],
+    ["成功选中", s.feasible_calls],
+    ["无可行节点", s.failed_calls],
+    ["重平衡驱逐", s.evictions],
+    ["缩容记录", s.scale_ins],
+    ["预算拦截", s.blocked_evictions]
+  ].map(([k,v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+
+  const violated = dash.distribution.some(r => r.mode === "hard" && !r.satisfied);
+  const el = document.getElementById("hardStatus");
+  if (violated) {
+    el.className = "badge bad";
+    el.textContent = "硬约束状态：存在拓扑变更后的待修复偏斜";
+  } else {
+    el.className = "badge ok";
+    el.textContent = "硬约束状态：当前全部满足";
+  }
+}
+
+function skewClass(skew, eligible) {
+  if (!eligible || skew < 0) return "excluded";
+  if (skew <= 0) return "skew0";
+  if (skew === 1) return "skew1";
+  if (skew === 2) return "skew2";
+  return "skew3";
+}
+
+function baselineText(row) {
+  if (row.baseline_kind === "min_domains_unmet_zero") return "MinDomains 未满足，基准强制为 0";
+  if (row.baseline_kind === "no_eligible_domain") return "无合格域";
+  return "所有合格域中的最小副本数";
+}
+
+function renderDistribution() {
+  const hs = dash.hangars;
+  document.getElementById("distHead").innerHTML = `<tr>
+    <th>工作负载 / 版本</th><th>约束</th><th>基准</th><th>当前偏斜 / 上限</th><th>状态</th>
+    ${hs.map(h => `<th class="num">${esc(h)}</th>`).join("")}
+  </tr>`;
+
+  document.getElementById("distBody").innerHTML = dash.distribution.map(row => {
+    const modeBadge = row.mode === "hard"
+      ? `<span class="badge hard">硬 maxSkew=${row.max_skew}${row.min_domains ? " / minDomains="+row.min_domains : ""}</span>`
+      : row.mode === "soft"
+        ? `<span class="badge soft">软 maxSkew=${row.max_skew}${row.min_domains ? " / minDomains="+row.min_domains : ""}</span>`
+        : `<span class="badge none">无拓扑约束</span>`;
+    const status = row.mode === "soft"
+      ? (row.satisfied ? `<span class="badge ok">软约束偏好满足</span>` : `<span class="badge warn">软约束偏好超出，仅影响打分</span>`)
+      : row.mode === "hard"
+        ? (row.satisfied ? `<span class="badge ok">Hard Satisfied</span>` : `<span class="badge bad">Violation · 待驱逐</span>`)
+        : `<span class="badge ok">—</span>`;
+    return `<tr>
+      <td><div class="wl-name">${esc(row.workload_name)}</div>
+        <div class="wl-sub">${esc(row.workload_id)} · <span class="mono">${esc(row.version)}</span> · 共 ${row.total}</div></td>
+      <td>${modeBadge}</td>
+      <td><b>${row.baseline}</b><div class="wl-sub">${esc(baselineText(row))}</div><div class="wl-sub">合格域 ${row.eligible_domains}</div></td>
+      <td><span class="mono" style="font-size:15px;font-weight:800">${row.worst_skew}</span> / <span class="mono">${row.max_skew ?? "—"}</span></td>
+      <td>${status}</td>
+      ${row.cells.map(c => `<td class="num"><div class="cell ${skewClass(c.skew,c.eligible)}" title="${esc(c.domain)}: ${c.eligible ? "偏斜 "+c.skew : "不参与计算："+reasonText(c.reason)}">
+        <div class="c">${c.count}</div><div class="s">${c.eligible ? "Δ"+c.skew : "排除"}</div>
+      </div></td>`).join("")}
+    </tr>`;
+  }).join("");
+}
+
+function renderScaleSelect() {
+  const sel = document.getElementById("scaleSelect");
+  const current = sel.value;
+  const options = dash.distribution.filter(r => r.total > 0)
+    .map(r => `<option value="${esc(r.workload_id)}||${esc(r.version)}">${esc(r.workload_name)} / ${esc(r.version)}（${r.total}）</option>`)
+    .join("");
+  sel.innerHTML = options;
+  if ([...sel.options].some(o => o.value === current)) sel.value = current;
+}
+
+function renderDecisionFilter() {
+  const sel = document.getElementById("decisionFilter");
+  const current = sel.value || "all";
+  const workloads = [...new Map(dash.state.decisions.map(d => [d.workload_id, d.workload_name])).entries()];
+  sel.innerHTML = `<option value="all">全部工作负载</option>` +
+    workloads.map(([id,name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
+  sel.value = [...sel.options].some(o => o.value === current) ? current : "all";
+}
+
+function filteredDecisions() {
+  const f = document.getElementById("decisionFilter").value;
+  let ds = dash.state.decisions || [];
+  if (f && f !== "all") ds = ds.filter(d => d.workload_id === f);
+  return [...ds].reverse();
+}
+
+function renderDecisions() {
+  const ds = filteredDecisions();
+  if (!selectedDecisionId || !ds.some(d => d.id === selectedDecisionId)) {
+    selectedDecisionId = ds[0]?.id || null;
+  }
+  document.getElementById("decisionList").innerHTML = ds.slice(0, 220).map(d => {
+    const node = d.nodes.find(n => n.selected);
+    return `<button class="decision-item ${d.id===selectedDecisionId?"active":""}" onclick="selectDecision('${d.id}')">
+      <div class="top"><span>#${d.seq} ${esc(d.workload_name)}</span><span class="mono">${esc(d.version)}</span></div>
+      <div class="meta">${d.selected_node_id ? "✅ "+esc(d.selected_node_id)+" / "+esc(node?.hangar || "") : "⛔ 无可行节点"} · 可行 ${d.feasible_node_ids.length}/${d.nodes.length} · batch ${esc(d.batch_id||"")} #${d.batch_index||""}</div>
+    </button>`;
+  }).join("") || `<div class="panel-b muted">暂无调度记录</div>`;
+  renderDecisionDetail();
+}
+
+function selectDecision(id) {
+  selectedDecisionId = id;
+  renderDecisions();
+}
+
+function scoreBar(v) {
+  const pct = Math.max(0, Math.min(100, v));
+  return `<span class="scorebar"><i style="width:${pct}%"></i></span>${fmt(v,1)}`;
+}
+
+function renderDecisionDetail() {
+  const d = (dash.state.decisions || []).find(x => x.id === selectedDecisionId);
+  const host = document.getElementById("decisionDetail");
+  if (!d) { host.innerHTML = `<div class="muted">选择左侧一次调度查看枚举和打分。</div>`; return; }
+
+  const baselineReason = d.baseline_forced_zero
+    ? "MinDomains 未满足：全局最小值按 0 处理"
+    : (d.eligible_domain_count === 0 ? "没有合格域" : "基准 = 合格域中的最小副本数");
+
+  host.innerHTML = `
+    <div class="detail-grid">
+      <div class="metric"><div class="k">选中节点</div><div class="v" style="font-size:15px">${esc(d.selected_node_id || "无可行节点")}</div></div>
+      <div class="metric"><div class="k">合格域 / MinDomains</div><div class="v">${d.eligible_domain_count} / ${d.min_domains || "—"}</div></div>
+      <div class="metric"><div class="k">全局基准</div><div class="v">${d.baseline}</div></div>
+      <div class="metric"><div class="k">MaxSkew / 模式</div><div class="v" style="font-size:16px">${d.max_skew || "—"} / ${d.hard ? "Hard" : (d.max_skew ? "Soft" : "None")}</div></div>
+    </div>
+    <div class="muted" style="margin-bottom:8px">${esc(baselineReason)}。公式：<span class="mono">postSkew = 当前域同版本副本数 + 1 - baseline</span>；硬约束 postSkew &gt; maxSkew 即 Filter。</div>
+    <div class="chips">
+      ${(d.domains||[]).map(x => `<span class="chip ${x.eligible ? (x.skew > d.max_skew ? "bad" : "good") : "warn"}" title="${esc(x.reason ? reasonText(x.reason) : "")}">
+        ${esc(x.domain)}: replicas=${x.replica_count}, skew=${x.eligible ? x.skew : "N/A"}${x.eligible ? "" : " ("+reasonText(x.reason)+")"}
+      </span>`).join("")}
+    </div>
+    <div class="table-wrap" style="max-height:430px">
+      <table class="node-table">
+        <thead><tr>
+          <th>节点</th><th>机库</th><th>Filter</th><th>当前→放入后偏斜</th>
+          <th>资源空闲分</th><th>拓扑软分</th><th>权重后总分</th><th>结果</th>
+        </tr></thead>
+        <tbody>
+          ${d.nodes.map(n => `<tr class="${n.selected ? "selected" : ""}">
+            <td class="mono">${esc(n.node_id)}</td>
+            <td class="mono">${esc(n.hangar)}</td>
+            <td>${(n.filter_failures||[]).length ? n.filter_failures.map(f => `<span class="reason">${esc(reasonText(f))}</span>`).join("") : `<span class="reason ok">通过</span>`}</td>
+            <td class="mono">${n.current_domain_count ?? "—"} → <b>${n.post_skew ?? "—"}</b> <span class="muted">(base ${n.baseline ?? d.baseline})</span></td>
+            <td>${scoreBar(n.resource_score)}</td>
+            <td>${n.spread_scored ? scoreBar(n.spread_score) : '<span class="muted">不打分</span>'}</td>
+            <td class="mono"><b>${fmt(n.weighted_score,2)}</b><div class="wl-sub">R×${n.resource_weight}${n.spread_scored ? " + S×"+n.spread_weight : ""}</div></td>
+            <td>${n.selected ? "🎯 选中" : (n.eligible ? "候选" : "过滤")}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderDisruptions() {
+  const rs = [...(dash.state.disruptions || [])].reverse();
+  document.getElementById("disruptionBody").innerHTML = rs.map(r => {
+    const type = r.kind === "rebalance"
+      ? `<span class="badge hard">重平衡驱逐</span>`
+      : `<span class="badge soft">缩容</span>`;
+    const status = r.status === "blocked_min_available"
+      ? `<span class="badge warn">预算拦截</span>`
+      : r.status === "evicted" ? `<span class="badge bad">已驱逐</span>` : `<span class="badge ok">已删除</span>`;
+    return `<tr>
+      <td class="mono">${esc(r.id)}<div class="wl-sub">#${r.seq}</div></td>
+      <td>${type}</td>
+      <td>${esc(r.workload_name)}<div class="wl-sub">${esc(r.workload_id)} · ${esc(r.version)}</div></td>
+      <td>${status}</td>
+      <td class="mono">${esc(r.domain || "")}<div class="wl-sub">${esc(r.node_id || "")} ${esc(r.replica_id || "")}</div></td>
+      <td class="mono">${r.domain_replica_count ?? ""}<div class="wl-sub">空闲分 ${fmt(r.resource_free_score,1)}</div></td>
+      <td class="mono">${r.skew_before ?? "—"} → <b>${r.skew_after ?? "—"}</b><div class="wl-sub">max ${r.max_skew}</div></td>
+      <td class="mono">${r.available_before} → <b>${r.available_after}</b><div class="wl-sub">min ${r.min_available}</div></td>
+      <td class="mono">${esc(r.replacement_node_id || (r.replacement_error ? "补位失败" : "—"))}${r.replacement_error ? `<div class="reason">${esc(r.replacement_error)}</div>` : ""}</td>
+      <td style="white-space:normal;min-width:220px">${esc(r.reason)}${r.trigger ? `<div class="wl-sub">触发：${esc(r.trigger)}</div>` : ""}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">暂无记录</td></tr>`;
+}
+
+function renderEvents() {
+  const es = [...(dash.state.events || [])].reverse();
+  document.getElementById("eventList").innerHTML = es.map(e =>
+    `<div class="event"><b>${esc(e.kind)}</b> <span class="muted mono">#${e.seq}</span><div>${esc(e.detail)}</div></div>`
+  ).join("") || `<div class="muted">暂无拓扑事件</div>`;
+}
+
+refresh().catch(e => showToast(String(e), true));
+setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 15000);
+</script>
+</body>
+</html>
